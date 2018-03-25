@@ -6,7 +6,6 @@ RUN apt-get update && \
 	apt-get install -y \
 		`# Common packages` \
 			git \
-			curl \
 		`# OCalm off-chain interpreter packages` \
 			wget \
 			gcc \
@@ -24,57 +23,74 @@ RUN opam init -y && \
 		cryptokit \
 		yojson
 
+# Setup OCaml off-chain interpreter
+RUN git clone https://github.com/TrueBitFoundation/ocaml-offchain && \
+	cd ocaml-offchain/interpreter && \
+	eval `opam config env` && \
+	make
+
 # Setup Emscripten
-RUN curl https://s3.amazonaws.com/mozilla-games/emscripten/releases/emsdk-portable.tar.gz > emsdk-portable.tar.gz && \
-    tar xzf emsdk-portable.tar.gz && \
-    rm emsdk-portable.tar.gz && \
-    cd emsdk-portable && \
-    ./emsdk update && \
-    ./emsdk install latest && \
-    ./emsdk activate latest
+RUN git clone https://github.com/juj/emsdk
+RUN cd emsdk && \
+	./emsdk install sdk-1.37.28-64bit && \
+	./emsdk activate sdk-1.37.28-64bit
+#RUN cd /root && \
+#	sed -e "s/'\/emsdk\/clang\/e1.37.28_64bit'/'\/usr\/bin'/" .emscripten > emscripten && \
+#	cp emscripten .emscripten && \
+#	echo && \
+#	echo && \
+#	cat .emscripten && \
+#	echo && \
+#	echo
+
 
 # Setup Node.js
-RUN curl -sL https://deb.nodesource.com/setup_9.x | bash - && \
-	apt-get install -y nodejs && \
-	npm install --unsafe-perm -g \
-		minimist \
-		ipfs-api
+#RUN curl -sL https://deb.nodesource.com/setup_9.x | bash - && \
+#	apt-get install -y nodejs && \
+#	npm install --unsafe-perm -g \
+#		minimist \
+#		ipfs-api
 
-# Clone empscripten wrapper
-RUN git clone https://github.com/squishyhuman/emscripten-module-wrapper.git -b fix-paths
 
-WORKDIR emscripten-module-wrapper
+#COPY . /emscripten-module-wrapper
+#WORKDIR emscripten-module-wrapper
+#RUN rm -rf ocaml-offchain && \
+#	ln -s ../ocaml-offchain ocaml-offchain
+#WORKDIR ..
 
-	# Clone OCaml off-chain interpreter
-	RUN git submodule init && \
-		git submodule update
+# Setup Emscripten module wrapper
+RUN bash -c 'git clone https://github.com/TrueBitFoundation/emscripten-module-wrapper && \
+	cd emscripten-module-wrapper && \
+	source /emsdk/emsdk_env.sh && \
+	npm install ipfs-api && \
+	sed -e "s/\/home\/sami//" prepare.js > prepare2.js'
 
-	WORKDIR ocaml-offchain
-		WORKDIR interpreter
+# Build example program
+RUN git clone https://github.com/mrsmkl/coindrop
+RUN bash -c 'cd coindrop && \
+	source /emsdk/emsdk_env.sh && \
+	emcc -o simple.js simple.c'
 
-			# Build OCaml off-chain interpreter
-			RUN eval `opam config env` && \
-				make
+RUN bash -c 'cd coindrop && \
+	`#emcc simple.c -s WASM=1 -o simple.js` && \
+	touch output.data && \
+	touch input.data && \
+	node /emscripten-module-wrapper/prepare2.js simple.js --file input.data --file output.data'
 
-		WORKDIR ..
-	WORKDIR ..
-WORKDIR ..
+#RUN git clone https://github.com/mrsmkl/coindrop.git
 
-# Clone example program
-RUN git clone https://github.com/mrsmkl/coindrop.git
+#WORKDIR coindrop
 
-WORKDIR coindrop
-
-	# Build example program
-	RUN /bin/bash -c "source ../emsdk-portable/emsdk_env.sh && \
-		emcc simple.c -s WASM=1 -o simple.js"
-
-	# Create empty files for input and output
-	RUN touch input.data && \
-		touch output.data
-
-	# Run example
-	RUN export NODE_PATH=$(npm root -g) &&  \
-		nodejs ../emscripten-module-wrapper/prepare.js simple.js --file input.data --file output.data
-
-WORKDIR ..
+#	# Build example program
+#	RUN /bin/bash -c "source ../emsdk-portable/emsdk_env.sh && \
+#		emcc simple.c -s WASM=1 -o simple.js"
+#
+#	# Create empty files for input and output
+#	RUN touch input.data && \
+#		touch output.data
+#
+#	# Run example
+#	RUN export NODE_PATH=$(npm root -g) &&  \
+#		node ../emscripten-module-wrapper/prepare.js simple.js --file input.data --file output.data
+#
+#WORKDIR ..
